@@ -1,0 +1,63 @@
+#! /bin/sh
+
+extra_args="-it"
+image="steam:local"
+groups="video wheel"
+devices="/dev/video* /dev/dri /dev/snd"
+volumes="/usr/lib/libnvidia-encode.so.1 /usr/lib/libnvcuvid.so.1 /usr/lib/libcuda.so.1 /tmp/.X11-unix /var/run/bumblebee.socket"
+env="DISPLAY XDG_RUNTIME_DIR"
+shm=512
+
+arglist(){
+    argname=$1
+    shift
+    for i in $@; do
+        echo $argname $i;
+    done
+}
+
+mountlist() {
+    echo $@ | sed -E 's/(\S+)/type=bind,source=\1,target=\1/g'
+}
+
+bindlist() {
+    echo $@ | sed -E 's/(\S+):(\S+)/type=bind,source=\1,target=\2/g'
+}
+
+
+getgroup(){
+    echo $(getent group $@| awk -F: '{print $3}')
+}
+
+envlist(){
+    eval echo $(echo $@ | sed -E 's/(\S+)/\1=$\1/g')
+}
+
+gid=$(id -g)
+uid=$(id -u)
+id="${uid}:${gid}"
+hostname=$(uname --nodename)
+run_bind=$(bindlist /run/user/${uid}:/run/user/1000 $HOME/.Xauthority:/home/steam/.Xauthority)
+xauthority="XAUTHORITY=/home/steam/.Xauthority"
+steam_dir="/home/steam/.local/Share/steam"
+shm_size=$(( ${shm} * 1024 * 1024 ))
+
+group_args=$(arglist --group-add $(getgroup ${groups}))
+device_args=$(arglist --device ${devices})
+volume_args=$(arglist --mount $(mountlist ${volumes}) ${run_bind})
+env_args=$(arglist --env $(envlist ${env}) ${xauthority} )
+
+
+if [ -z $(docker images -q "${image}") ]; then
+    docker build -t ${image} .
+fi
+
+nvidia-docker run --rm      \
+    --hostname=${hostname}  \
+    --shm-size=${shm_size}  \
+    ${device_args}          \
+    ${volume_args}          \
+    ${group_args}           \
+    ${env_args}             \
+    ${extra_args}           \
+    ${image} 
